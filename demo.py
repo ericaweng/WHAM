@@ -37,54 +37,80 @@ except:
     _run_global = False
 
 
-def load_bboxes_and_poses_new(video, length):
+def load_bboxes_and_poses(video, length, args):
     """ detect 3d poses for all detections that have a fully_visible or partially_visible bbox detection
      OR have a 2d pose keypoint annotations """
     scene_name_w_image = video.split('/')[-1].split(".")[0].replace('image_', 'image')
-
-    # load bboxes
-    dataroot_labels = f"/home/eweng/code/PoseFormer/datasets/jackrabbot/train/labels/labels_2d/"
-    bboxes_path = os.path.join(dataroot_labels, f'{scene_name_w_image}.json')
-    with open(bboxes_path, 'r') as f:
-        bbox_labels = json.load(f)['labels']
-    all_bboxes = {image_id: {int(label['label_id'].split(":")[-1]): label['box']
-                   for label in bbox_labels}  # if 'visible' in label['attributes']['occlusion']}
-                  for image_id, labels in sorted(bbox_labels.items())}
-    assert len(
-            all_bboxes) == length, f"there should be a list of bboxes for each video frame. but len(all_bboxes): {len(all_bboxes)}, video length: {length}"
 
     # load poses
     dataroot_poses = f"/home/eweng/code/PoseFormer/datasets/jackrabbot/train/labels/labels_2d_pose_coco/"
     with open(os.path.join(dataroot_poses, f'{scene_name_w_image}.json'), 'r') as f:
         pose_labels = json.load(f)
     image_id_to_pose_annos = {
-            image['id']: [ann for ann in pose_labels['annotations'] if ann['image_id'] == image['id']]
+            int(image['file_name'].split('/')[-1].split('.')[0]): [ann for ann in pose_labels['annotations'] if ann['image_id'] == image['id']]
+            # image['id']: [ann for ann in pose_labels['annotations'] if ann['image_id'] == image['id']]
+            # image['file_name'].split('/')[-1]: [ann for ann in pose_labels['annotations'] if ann['image_id'] == image['id']]
             for image in pose_labels['images']}
 
-    image_id_to_path = {image['id']: image['file_name'].split('/')[-1] for image in pose_labels['images']}
+    # image_path_to_id = {image['file_name'].split('/')[-1]: image['id'] for image in pose_labels['images']}
+    # image_path_to_id = {image['file_name'].split('/')[-1]: image['id'] for image in pose_labels['images']}
+
+    # load bboxes
+    dataroot_labels = f"/home/eweng/code/PoseFormer/datasets/jackrabbot/train/labels/labels_2d/"
+    bboxes_path = os.path.join(dataroot_labels, f'{scene_name_w_image}.json')
+    with open(bboxes_path, 'r') as f:
+        bbox_labels = json.load(f)['labels']
+    all_bboxes = {int(image_path.split('.')[0]): {int(label['label_id'].split(":")[-1]): label
+                   for label in labels}  # if 'visible' in label['attributes']['occlusion']}
+                  for image_path, labels in sorted(bbox_labels.items())}
+    # all_bboxes = {image_path_to_id[image_path]: {int(label['label_id'].split(":")[-1]): label
+    # all_bboxes = {image_path: {int(label['label_id'].split(":")[-1]): label
+
+    assert len(
+            all_bboxes) == length, f"there should be a list of bboxes for each video frame. but len(all_bboxes): {len(all_bboxes)}, video length: {length}"
+
+
+    for image_id in image_id_to_pose_annos:
+        assert image_id in all_bboxes, f"all images with poses should have a bbox detection, but image_id {image_id} is not have a bbox. only these image_ids have bboxes: {all_bboxes.keys()}"
+
 
     # convert poses visibility to score percentages
-    all_poses = []
+    all_poses_and_bboxes = {}
     for image_id, annos in sorted(image_id_to_pose_annos.items(), key=lambda x: x[0]):
         poses_this_frame = {}
         for ann in annos:
             pose_reformatted = np.array(ann['keypoints']).reshape(17, 3)
             pose_reformatted[:, -1] = np.where(pose_reformatted[:, -1] == 0, 1, 1)  # 0.01, 1)
-            poses_this_frame[ann['track_id']] = pose_reformatted
-        all_poses.append(poses_this_frame)
-    # video_length, num_objects, 17, 3 (x, y, score)
+            poses_this_frame[ann['track_id']] = {'pose': pose_reformatted}
+            # assert ann['track_id'] in all_bboxes[image_id], f"all poses should have a bboxes detection, but pose track_id {ann['track_id']} is not have a bbox. only these track_ids have bboxes: {all_bboxes[image_id].keys()}"
 
-    assert len(
-        all_poses) == length, f"there should be a list of poses for each video frame. but len(all_poses): {len(all_poses)}, video length: {length}"
+        for track_id, box in all_bboxes[image_id].items():
+            # if 'visible' in box['annotation']['occlusion']:
+            #     all_bboxes.append({'bbox': box['box'], 'id': track_id})
+            if track_id in poses_this_frame:
+                poses_this_frame[track_id]['box'] = box_to_2d_corners(box['box'])
+            elif 'attributes' not in box or 'occlusion' not in box['attributes'] or 'visible' in box['attributes']['occlusion']:
+                poses_this_frame[track_id] = {'box': box_to_2d_corners(box['box'])}
+            elif args.use_all_gt_boxes:
+                poses_this_frame[track_id] = {'box': box_to_2d_corners(box['box'])}
 
-    for frame_id, (bboxes, poses) in enumerate(zip(all_bboxes, all_poses)):
-        for track_id, pose in poses.items():
-            assert track_id in bboxes, f"all poses should have a bboxes detection, but pose track_id {track_id} is not have a bbox. only these track_ids have bboxes: {bboxes.keys()}"
+        # add boxes to those that do not have one
+        for track_id, pose_bbox_dict in poses_this_frame.items():
+            if 'box' not in pose_bbox_dict:
+                ## get max and min of the keypoints as the box
+                poses_this_frame[track_id]['box'] = np.concatenate([np.min(pose_bbox_dict['pose'], axis=0)[:2],
+                                                                    np.max(pose_bbox_dict['pose'], axis=0)[:2]])
+            x0,y0,x1,y1 = pose_bbox_dict['box']
+            assert x1 > x0 and y1 > y0, f"invalid box: {pose_bbox_dict['box']}"
 
-    return all_bboxes, all_poses
+        # all_poses_and_bboxes.append(poses_this_frame)
+        all_poses_and_bboxes[image_id] = poses_this_frame
+
+    # video_length, num_objects, {pose: (17, 3), box: (4,)}
+    return all_poses_and_bboxes
 
 
-def load_bboxes_and_poses(video, length):
+def load_bboxes_and_poses_old(video, length):
     # load bboxes
     scene_name_w_image = video.split('/')[-1].split(".")[0].replace('image_', 'image')
     dataroot_labels = f"/home/eweng/code/PoseFormer/datasets/jackrabbot/train/labels/labels_2d/"
@@ -131,7 +157,7 @@ def box_to_2d_corners(box):
     x, y, w, h = box
     x0, x1 = x, x + w
     y0, y1 = y, y + h
-    return [x0, y0, x1, y1]
+    return np.array([x0, y0, x1, y1])
 
 CONNECTIVITIES_LIST = [[1, 2], [0, 4], [3, 4], [8, 10], [5, 7], [10, 13], [14, 16], [4, 5], [7, 12], [4, 8], [3, 6], [13, 15], [11, 14], [6, 9], [8, 11]]
 
@@ -200,7 +226,7 @@ def run(cfg,
             slam = None
 
         if args.use_gt_poses and video.split('/')[-1].split("_image")[0] in TRAIN:
-            all_bboxes, all_poses = load_bboxes_and_poses(video, length)
+            all_poses_and_bboxes = load_bboxes_and_poses(video, length, args)
 
         bar = Bar('Preprocess: 2D detection and SLAM', fill='#', max=length)
         while (cap.isOpened()):
@@ -209,38 +235,48 @@ def run(cfg,
             if not flag: break
 
             # for each bounding box: if not gt pose exists, then do pose
-            if args.use_gt_poses and video.split('/')[-1].split("_image")[0] in TRAIN:
-                bboxes = []
+            if args.use_gt_poses and video.split('/')[-1].split("_image")[0] in TRAIN and current_frame in all_poses_and_bboxes:
                 # for each ped id for which there is a box, populate the tracker with its pose if it exists.
                 # if no pose exists for a gt box, detect it.
-                for track_id, bbox in all_bboxes[current_frame].items():
-                    if track_id in all_poses[current_frame]:
-                        pose = all_poses[current_frame][track_id]
 
+                # video_length, num_objects, {pose: (17, 3), box: (4,)}
+                bboxes_to_est_pose = []
+                for track_id, bbox_pose_dict in all_poses_and_bboxes[current_frame].items():
+                    if 'pose' in bbox_pose_dict:
                         # load gt 2d tracks into tracking_results
                         detector.tracking_results['id'].append(track_id)
                         detector.tracking_results['frame_id'].append(detector.frame_id)  # could also use current_frame
                         assert detector.frame_id == current_frame, f"should be the same frame_id. but detector.frame_id: {detector.frame_id}, current_frame: {current_frame}"
-                        detector.tracking_results['bbox'].append(detector.xyxy_to_cxcys(np.array(box_to_2d_corners(bbox))))
-                        detector.tracking_results['keypoints'].append(pose[None])
+                        detector.tracking_results['bbox'].append(detector.xyxy_to_cxcys(bbox_pose_dict['box']))
+                        detector.tracking_results['keypoints'].append(bbox_pose_dict['pose'][None])
 
                     else:  # no gt pose exists for this bbox. so detect it using ViTPose
-                        pass#bboxes.append({'bbox': box_to_2d_corners(bbox), 'id': track_id})
+                        bboxes_to_est_pose.append({'bbox': bbox_pose_dict['box'], 'id': track_id})
 
-                if len(bboxes) > 0:
-                    detector.pose_estimation(img, bboxes)  # logging the tracking results already occurs in the function
+                if len(bboxes_to_est_pose) > 0:
+                    assert (len(bboxes_to_est_pose) + np.sum(['pose' in bbox_pose_dict for bbox_pose_dict in all_poses_and_bboxes[current_frame].values()])
+                            == len(all_poses_and_bboxes[current_frame])), \
+                        f"should have a pose for each bbox. but len(bboxes): {len(bboxes_to_est_pose)}, len(all_poses_and_bboxes[current_frame]): {len(all_poses_and_bboxes[current_frame])}"
+                    detector.pose_estimation(img, bboxes_to_est_pose)  # logging the tracking results already occurs in the function
+                    assert np.all([d.shape == detector.tracking_results['bbox'][0].shape for d in detector.tracking_results['bbox']]), \
+                        f"should have the same shape. but [d.shape for d in detector.tracking_results['bbox']]: {[d.shape for d in detector.tracking_results['bbox']]}"
+                    assert np.all([d.shape == detector.tracking_results['keypoints'][0].shape for d in detector.tracking_results['keypoints']]), \
+                        f"should have the same shape. but [d.shape for d in detector.tracking_results['keypoints']]: {[d.shape for d in detector.tracking_results['keypoints']]}"
+                else:
+                    detector.frame_id += 1
 
             else:
                 # 2D detection and tracking from scratch w/o gt bboxes nor poses
-                detector.track(img, fps, length)
+                # detector.track(img, fps, length)
+                detector.frame_id += 1
 
             if args.visualize:
-                assert len(bboxes) + len(all_poses[current_frame]) == len(all_bboxes[current_frame]), \
-                    f"should be the same number of bboxes. but len(bboxes): {len(bboxes)}, len(all_poses[current_frame]): {len(all_poses[current_frame])}, len(all_bboxes[current_frame]): {len(all_bboxes[current_frame])}"
-                estimated_poses = np.concatenate(detector.tracking_results['keypoints'][-len(bboxes):])[..., :2]
-                gt_poses = np.array(list(all_poses[current_frame].values()))[..., :2]
-                gt_bboxes = [box['bbox'] for box in bboxes]
-                show_image(img, gt_bboxes, gt_poses, estimated_poses)
+                pass
+                # if args.use_gt_poses:
+                #     estimated_poses = np.concatenate(detector.tracking_results['keypoints'][-len(bboxes_to_est_pose):])[..., :2]
+                #     gt_poses = np.array([d['pose'] for d in all_poses_and_bboxes[current_frame].values()])[...,:2]
+                #     gt_bboxes = [box['bbox'] for box in bboxes]
+                #     show_image(img, gt_bboxes, gt_poses, estimated_poses)
 
             # SLAM
             if slam is not None:
@@ -253,6 +289,7 @@ def run(cfg,
             print("self.tracking_results.keys()", self.tracking_results.keys())
 
         tracking_results = detector.process(fps)
+        assert len(tracking_results[0]['features']) == 0
 
         if slam is not None:
             slam_results = slam.process()
@@ -277,6 +314,11 @@ def run(cfg,
         logger.info(f'Already processed data exists at {output_pth} ! Load the data .')
 
     #### PART 2: 3d pose lifting and move poses from camera coords to world coords
+    if (osp.exists(osp.join(output_pth, "results.pth")) and
+            osp.exists(osp.join(output_pth, 'output.mp4'))):
+        logger.info(f'3d pose est results already saved at {output_pth}')
+        return
+
     # Build dataset
     dataset = CustomDataset(cfg, tracking_results, slam_results, width, height, fps)
 
@@ -319,7 +361,7 @@ if __name__ == '__main__':
                         default='examples/demo_video.mp4',
                         help='input video path or youtube link')
 
-    parser.add_argument('--output_pth', type=str, default='../pose_forecasting/viz/wham-demo',
+    parser.add_argument('--output_pth', type=str, default='../viz/wham-demo',
                         help='output folder to write results')
 
     parser.add_argument('--calib', type=str, default=None,
@@ -332,13 +374,14 @@ if __name__ == '__main__':
                         help='Visualize the output mesh if True')
 
     parser.add_argument('--use_gt_poses', action='store_true')
+    parser.add_argument('--use_all_gt_boxes', action='store_true')
 
     args = parser.parse_args()
 
     cfg = get_cfg_defaults()
     cfg.merge_from_file('configs/yamls/demo.yaml')
 
-    input_vid_dir = "../pose_forecasting/viz/wham_input_vids"
+    input_vid_dir = "../viz/wham_input_vids"
     scenes = os.listdir(input_vid_dir)
     for scene in scenes:
         # if 'gates-ai' not in scene:

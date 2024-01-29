@@ -65,6 +65,7 @@ class DetectionModel(object):
     def xyxy_to_cxcys(self, bbox):
         cx, cy = bbox[[0, 2]].mean(), bbox[[1, 3]].mean()
         scale = max(bbox[2] - bbox[0], bbox[3] - bbox[1]) / 200
+        assert scale > 0, f"scale: {scale}"
         return np.array([[cx, cy, scale]])
 
     def pose_estimation(self, img, bboxes):
@@ -81,6 +82,8 @@ class DetectionModel(object):
         assert len(pose_results) == len(bboxes), f"should predict one pose per bbox. but len(pose_results): {len(pose_results)}, len(bboxes): {len(bboxes)}"
         for pose_result,bbox in zip(pose_results, bboxes):
             xyxy = pose_result['bbox']
+            x0,y0,x1,y1 = xyxy
+            assert x0 < x1 and y0 < y1, f"xyxy: {xyxy}"
             pose_bbox = self.xyxy_to_cxcys(xyxy)
             bb_bbox = self.xyxy_to_cxcys(np.array(bbox['bbox']))
             assert np.isclose(bb_bbox, pose_bbox).all(), f"bb_bbox: {bb_bbox}, pose_bbox: {pose_bbox}"

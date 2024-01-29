@@ -107,69 +107,81 @@ def rotate_trajectory(trajectory):
 
 
 
-def main(scene, args, cam_num):
-    print(f"scene: {scene}, cam_num: {cam_num}")
+def main(scene, args):
+    print(f"scene: {scene}")
     split = 'train' if scene in TRAIN else 'test'
 
     # load in ego-perspective camera rgb images for plotting
-    image_dir = f"jrdb/{split}/images/image_{cam_num}/{scene}"
+    image_dir = f"jrdb/{split}/images/image_0/{scene}"
     image_list = sorted(os.listdir(image_dir))
 
     # load all images in image_list
     images = [cv2.imread(os.path.join(image_dir, imfile)) for imfile in image_list]
 
+    # load all egomotions from all cameras
     use_droid = args.use_droid
     droid_or_dvpo = "droidslam" if use_droid else "dvpo"
-    if use_droid:
-        try:
-            egomotion = np.load(f"../DROID-SLAM/reconstructions/{scene}/traj_est.npy")  # (num_frames, 7)
-        except:
-            print(f"no DROID-SLAM results for {scene}")
-            return
-    else:
-        try:
-            egomotion = joblib.load(f"../viz/wham-demo/{scene}_image_{cam_num}/slam_results.pth")
-        except:
-            print(f"no dvpo results for {scene}")
-            return
+    egomotion = []
+    for cam_num in [0, 2, 4, 6, 8]:
+        if use_droid:
+            try:
+                egomotion.append(np.load(f"../DROID-SLAM/reconstructions/{scene}_image{cam_num}/traj_est.npy"))  # (num_frames, 7)
+            except:
+                print(f"no DROID-SLAM results for {scene} image{cam_num}")
+                continue
+        else:
+            try:
+                egomotion.append(joblib.load(f"../viz/wham-demo/{scene}_image_{cam_num}/slam_results.pth"))
+            except:
+                print(f"no dvpo results for {scene} image{cam_num}")
+                continue
+
+    egomotions_all = np.stack(egomotion, axis=0)
+    egomotion = egomotions_all.mean(0)
+
+    additional_yaw = np.arange(5) * np.pi / 5
+    assert np.all(additional_yaw < 2 * np.pi), f"additional_yaw should be < 2 pi but is: {additional_yaw / np.pi} pi"
+    rotate_egomotion = np.array([[[np.cos(yaw), np.sin(yaw), 0],
+                                 [-np.sin(yaw), np.cos(yaw), 0],
+                                 [0,0,1]] for yaw in additional_yaw])
+    print(f"rotate_egomotion: {rotate_egomotion.shape}")
+    scale = 7.5
+
+    ego_positions_all = egomotions_all[:,:,[2,0,1]] * scale
+    print(f"ego_positions_all: {ego_positions_all.shape}")
+    ego_positions_all[:,:, 1] = -ego_positions_all[:,:, 1]  # negate prev-x-now-y
+    ego_positions_all[:,:, 2] = -ego_positions_all[:,:, 2]  # negate prev-y-now-z
+
+    fig = plt.figure()
+    # axes = fig.add_subplot(221, projection='3d')
+    axes = [fig.add_subplot(221, projection='3d'), fig.add_subplot(222, projection='3d'),
+            fig.add_subplot(223, projection='3d'), fig.add_subplot(224, projection='3d')]
+
+    # four different views
+    colors = ['r', 'g', 'b', 'c', 'm']
+    for ax_i, (ax, (elev, azim)) in enumerate(zip(axes, zip([0, 15, 45, 70], [0, 40, 70, 90]))):
+        for ego_pos_i, ego_position in enumerate(ego_positions_all):
+            ax.view_init(elev=elev, azim=azim)
+            ax.set_xlabel("x")
+            ax.set_ylabel("y")
+            ax.set_zlabel("z")
+            ax_set_up(ax, stuff=ego_positions_all.reshape(-1, 3))
+            ax.plot(*ego_position.T, color=colors[ego_pos_i], label=f"{ego_pos_i}")
+        if ax_i == 2:
+            ax.legend(loc='lower left', bbox_to_anchor=(0.9, 0.8))
+
+    ego_traj_save_dir = f'../viz/jrdb_egomotion_{droid_or_dvpo}'
+    if not os.path.exists(ego_traj_save_dir):
+        os.makedirs(ego_traj_save_dir)
+    num_cams_available = ego_positions_all.shape[0]
+    fig.savefig(f'{ego_traj_save_dir}/{scene}_3d_{num_cams_available}_cams.png')
+    plt.close(fig)
+
+    print("done saving plot of egomotions from all cameras")
+    return
+
     # (num_frames, 7)
     assert len(image_list) == len(egomotion), f"len(image_list): {len(image_list)}, len(egomotion): {len(egomotion)}"
-
-    ###### calculate slam scale factor based on ratio between avg height of 2d bboxes and 3d bboxes
-    # dataroot_labels = f"/home/eweng/code/PoseFormer/datasets/jackrabbot/train/labels/labels_2d/"
-    # labels_path = os.path.join(dataroot_labels, f'{scene_name_w_image}.json')
-    # with open(labels_path, 'r') as f:
-    #     labels_all_frames_2d = json.load(f)['labels']
-    # dataroot_labels = f"/home/eweng/code/PoseFormer/datasets/jackrabbot/train/labels/labels_3d/"
-    # labels_path = os.path.join(dataroot_labels, f'{scene_name_w_image}.json')
-    # with open(labels_path, 'r') as f:
-    #     labels_all_frames_3d = json.load(f)['labels']
-    #
-    # # gather all ratios from 2d and 3d bounding boxes
-    # all_ratios = []
-    # for (_, labels_2d), (_, labels_3d) in zip(sorted(labels_all_frames_2d.items()), sorted(labels_all_frames_3d.items())):
-    #     ratios = {}
-    #     assert len(labels_2d) == len(labels_3d), f"len(labels_2d): {len(labels_2d)}, len(labels_3d): {len(labels_3d)}"
-    #     for label_2d, label_3d in zip(sorted(labels_2d), sorted(labels_3d)):
-    #         ped_id = int(label_2d['label_id'].split(":")[-1])
-    #         assert len(label_2d['box']) == len(label_3d['box']), f"len(label_2d['box']): {len(label_2d['box'])}, len(label_3d['box']): {len(label_3d['box'])}"
-    #         assert ped_id == int(label_3d['label_id'].split(":")[-1]), f"ped_id: {ped_id}, int(label_3d['label_id'].split(':')[-1]): {int(label_3d['label_id'].split(':')[-1])}"
-    #         h2 = label_2d['box'][3]
-    #         h3 = label_3d['box']['h']
-    #         ratios[ped_id] = h3 / h2  # multiply by this ratio to convert image scale (pixels) to real-life scale (m)
-    #     print(ratios.values())
-    #     all_ratios.append(ratios)
-
-    ###### calculate slam scale factor based on avg agent velocity?
-    # plot distribution of velocities for all peds in this scene
-    # hist = (df.groupby('id').apply(lambda x: np.linalg.norm(np.diff(x[['x', 'y']].values, axis=0), axis=1).mean()) * 2.5).values
-    # fig, ax = plt.subplots()
-    # ax.hist(hist)
-    # ego_traj_save_dir = f'../viz/jrdb-egomotion-{droid_or_dvpo}'
-    # plt.savefig(f'{ego_traj_save_dir}/{scene}_ped_velocities_hist.png')
-    # plt.close(fig)
-    # import ipdb; ipdb.set_trace()
-    # scale = np.mean()
 
     scale = 7.5  # figure out a better way to calculate this
 
@@ -188,33 +200,9 @@ def main(scene, args, cam_num):
     z becomes x, y becomes z, x becomes -y
     '''
     ego_positions = egomotion[:,[2,0,1]] * scale
-    # (not a proper rotation matrix...)
-    # 0 -1 0
-    # 0  0 1
-    # 1  0 0
     ego_positions[:, 1] = -ego_positions[:, 1]  # negate prev-x-now-y
     ego_positions[:, 2] = -ego_positions[:, 2]  # negate prev-y-now-z
     ego_rotations = egomotion[:, 3:]
-
-    fig = plt.figure()
-    # axes = fig.add_subplot(221, projection='3d')
-    axes = [fig.add_subplot(221, projection='3d'), fig.add_subplot(222, projection='3d'),
-            fig.add_subplot(223, projection='3d'), fig.add_subplot(224, projection='3d')]
-
-    # four different views
-    for ax, (elev, azim) in zip(axes, zip([0, 15, 45, 70], [0, 40, 70, 90])):
-        ax.view_init(elev=elev, azim=azim)
-        ax.set_xlabel("x")
-        ax.set_ylabel("y")
-        ax.set_zlabel("z")
-        ax_set_up(ax, stuff=ego_positions)
-        ax.plot(*ego_positions.T)
-
-    ego_traj_save_dir = f'../viz/jrdb-egomotion-{droid_or_dvpo}'
-    if not os.path.exists(ego_traj_save_dir):
-        os.makedirs(ego_traj_save_dir)
-    plt.savefig(f'{ego_traj_save_dir}/{scene}_3d.png')
-    plt.close(fig)
 
     # okay from here it's plotting the ego-motion adjusted 2d BEV trajectories
     # load BEV 2d trajs
@@ -223,22 +211,23 @@ def main(scene, args, cam_num):
     df = pd.read_csv(bev_traj_path, sep=' ', header=None, usecols=[0, 1, 10, 11])
     df.columns = ['frame', 'id', 'x', 'y']
     df_ego = df.copy()
-    assert len(df['frame'].unique()) == len(image_list), f"len(df['frame'].unique()): {len(df['frame'].unique())}, len(image_list): {len(image_list)}"
+    assert len(df['frame'].unique()) == len(image_list), \
+        f"len(df['frame'].unique()): {len(df['frame'].unique())}, len(image_list): {len(image_list)}"
 
     # only keep the first BEV coords of the ego positions
     ego_positions = ego_positions[:,:2]
     # confirm same length as existing trajectories
-    assert len(ego_positions) == len(df['frame'].unique()), f"len(positions): {len(ego_positions)}, len(df['frame'].unique()): {len(df['frame'].unique())}"
+    assert len(ego_positions) == len(df['frame'].unique()), \
+        f"len(positions): {len(ego_positions)}, len(df['frame'].unique()): {len(df['frame'].unique())}"
 
     def rotation_matrix(orientation, additional_yaw=0):
         # (using camera coords, the pitch is the rotation along the x-z plane, around the y-axis
         yaw = Quaternion(*orientation).yaw_pitch_roll[1]
-        return np.array([[np.cos(yaw), np.sin(yaw)], [-np.sin(yaw), np.cos(yaw)]])  # negate, the y-axis points downward
+        return np.array([[np.cos(yaw+additional_yaw), np.sin(yaw+additional_yaw)],
+                         [-np.sin(yaw+additional_yaw), np.cos(yaw+additional_yaw)]])  # negate, the y-axis points downward
 
-    additional_yaw = 2 * np.pi / 5 * cam_num / 2
-    assert additional_yaw < 2 * np.pi, f"additional_yaw should be < 2 pi but is: {additional_yaw / np.pi:,2f} pi"
     # Apply rotation
-    frame_to_ego_rot_mat = {frame: rotation_matrix(ego_rotations[i], additional_yaw) for i, frame in enumerate(df['frame'].unique())}
+    frame_to_ego_rot_mat = {frame: rotation_matrix(ego_rotations[i]) for i, frame in enumerate(df['frame'].unique())}
 
     def apply_rotation(row):
         frame = row['frame']
@@ -325,14 +314,14 @@ def main(scene, args, cam_num):
     output_file_3d = f'/home/eweng/code/viz/jrdb_{droid_or_dvpo}'
     if not os.path.exists(output_file_3d):
         os.makedirs(output_file_3d)
-    output_file_3d = f'{output_file_3d}/{scene}_image{cam_num}.mp4'
+    output_file_3d = f'{output_file_3d}/{scene}.mp4'
     with imageio.get_writer(output_file_3d, fps=fps) as writer:
         for frame in frames:
             writer.append_data(frame)
     print(f"saved to: {output_file_3d}")
 
     # save new trajectories
-    bev_traj_adjusted_path = f'/home/eweng/code/PoseFormer/jrdb_adjusted/{scene}_image{cam_num}.txt'
+    bev_traj_adjusted_path = f'/home/eweng/code/PoseFormer/jrdb_adjusted/{scene}.txt'
     if not os.path.exists(os.path.dirname(bev_traj_adjusted_path)):
         os.makedirs(os.path.dirname(bev_traj_adjusted_path))
     df.to_csv(bev_traj_adjusted_path, index=False)
@@ -380,11 +369,10 @@ if __name__ == '__main__':
     if args.mp:
         import multiprocessing as mp
         mp.set_start_method('spawn')
-        for cam_num in [0,2,4,6,8]:
-            for scene in with_movement:
-                list_of_args.append((scene, args, cam_num))
+        for scene in with_movement:
+            list_of_args.append((scene, args))
         with mp.Pool(60) as p:
             p.starmap(main, list_of_args)
     else:
-        scene = 'tressider-2019-04-26_3'
-        main(scene, args, 2)
+        scene = 'bytes-cafe-2019-02-07_0'#'tressider-2019-04-26_3'
+        main(scene, args)
