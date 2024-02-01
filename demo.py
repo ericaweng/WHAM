@@ -284,12 +284,7 @@ def run(cfg,
 
             bar.next()
 
-        else:
-            print("time to check tracking results format")
-            print("self.tracking_results.keys()", self.tracking_results.keys())
-
         tracking_results = detector.process(fps)
-        assert len(tracking_results[0]['features']) == 0
 
         if slam is not None:
             slam_results = slam.process()
@@ -373,7 +368,7 @@ if __name__ == '__main__':
     parser.add_argument('--visualize', action='store_true',
                         help='Visualize the output mesh if True')
 
-    parser.add_argument('--use_gt_poses', action='store_true')
+    parser.add_argument('--dont_use_gt_poses', dest='use_gt_poses', action='store_false')#true')
     parser.add_argument('--use_all_gt_boxes', action='store_true')
 
     args = parser.parse_args()
@@ -381,13 +376,37 @@ if __name__ == '__main__':
     cfg = get_cfg_defaults()
     cfg.merge_from_file('configs/yamls/demo.yaml')
 
-    input_vid_dir = "../viz/wham_input_vids"
-    scenes = os.listdir(input_vid_dir)
-    for scene in scenes:
-        # if 'gates-ai' not in scene:
-        #     continue
-        print(f"scene: {scene}")
+    # input_vid_dir = "../viz/wham_input_vids"
+    # scenes = os.listdir(input_vid_dir)
 
+    # TRAIN only
+    with_movement = ['clark-center-2019-02-28_0',
+                     'clark-center-2019-02-28_1',
+                     'clark-center-intersection-2019-02-28_0',
+                     'cubberly-auditorium-2019-04-22_0',  # small amount of rotation
+                     'forbes-cafe-2019-01-22_0',
+                     'gates-159-group-meeting-2019-04-03_0',
+                     'gates-to-clark-2019-02-28_1',  # linear movement
+                     'memorial-court-2019-03-16_0',
+                     'huang-2-2019-01-25_0',
+                     'huang-basement-2019-01-25_0',
+                     'meyer-green-2019-03-16_0',  # some rotation and movement
+                     'nvidia-aud-2019-04-18_0',  # small amount of rotation
+                     'packard-poster-session-2019-03-20_0',  # some rotation and movement
+                     'tressider-2019-04-26_2',]
+
+    for scene in with_movement:
+        # if 'clark-center-2' not in scene:
+        # if 'clark-center-i' not in scene and 'forbes' not in scene:
+        # if 'cubberly' not in scene and 'memorial' not in scene:
+        if 'gates' not in scene:
+        # if 'huang' not in scene:
+        # if 'meyer' not in scene and 'nvidia' not in scene:
+        # if 'packard' not in scene and 'tressider' not in scene:
+            continue
+        print(f"scene: {scene}")
+        scene = f"{scene}_image_0.mp4"
+        input_vid_dir = "../viz/wham_input_vids"
         args.video = f"{input_vid_dir}/{scene}"
 
         logger.info(f'GPU name -> {torch.cuda.get_device_name()}')

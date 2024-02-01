@@ -25,12 +25,6 @@ import torch.nn.functional as F
 from jrdb_split import TRAIN, TEST
 
 
-def show_image(image):
-    image = image.permute(1, 2, 0).cpu().numpy()
-    cv2.imshow('image', image / 255.0)
-    cv2.waitKey(1)
-
-
 def ax_set_up(ax, stuff):
     if stuff is not None:
         center = (stuff.min(axis=0) + stuff.max(axis=0)) / 2
@@ -48,66 +42,22 @@ def ax_set_up(ax, stuff):
         ax.set_zlim(dim_min_z, dim_max_z)
 
 
-def modify_7dof_pose(pos_ori):
-    # Position transformation: swap Y and Z, negate new Y
-    position, orientation = pos_ori[:3], pos_ori[3:]
-    x, y, z = position
-    new_position = np.array([x, -z, y])
-
-    # Orientation transformation
-    # Rotate 90 degrees around X (to swap Y and Z)
-    rotate_x = Quaternion(axis=[1, 0, 0], angle=np.pi / 2)
-    # Rotate 180 degrees around new Z (to negate new Y)
-    rotate_z = Quaternion(axis=[0, 0, 1], angle=np.pi)
-    new_orientation = rotate_z * rotate_x * orientation
-
-    return (*new_position, *new_orientation)
-
-
-def rotate_trajectory(trajectory):
-    """
-    Rotate a trajectory so that the average direction of the first two segments points in the positive x direction.
-
-    :param trajectory: List of (x, y) tuples representing the trajectory points.
-    :return: Rotated list of (x, y) tuples.
-    """
-
-    def calculate_angle(v1, v2):
-        """
-        Calculate the angle between two vectors v1 and v2.
-        """
-        unit_v1 = v1 / np.linalg.norm(v1)
-        unit_v2 = v2 / np.linalg.norm(v2)
-        dot_product = np.dot(unit_v1, unit_v2)
-        angle = np.arccos(dot_product)
-        return angle
-
-    # Calculate the average direction of the first two segments
-    segment_1 = np.array(trajectory[1]) - np.array(trajectory[0])
-    segment_2 = np.array(trajectory[2]) - np.array(trajectory[1])
-    average_direction = (segment_1 + segment_2) / 2
-
-    # Calculate the angle to rotate
-    angle_to_rotate = calculate_angle(average_direction, np.array([1, 0]))
-
-    # Determine the direction of rotation (clockwise or counter-clockwise)
-    if np.cross(segment_1, segment_2) > 0:
-        angle_to_rotate = -angle_to_rotate
-
-    # Create a rotation matrix
-    rotation_matrix = np.array([
-        [np.cos(angle_to_rotate), -np.sin(angle_to_rotate)],
-        [np.sin(angle_to_rotate), np.cos(angle_to_rotate)]
-    ])
-
-    # Apply rotation to all points in the trajectory
-    rotated_trajectory = [np.dot(rotation_matrix, np.array(point)).tolist() for point in trajectory]
-
-    return rotated_trajectory
-
-
-
 def main(scene, args):
+    scene_to_scale_dvpo = {'clark-center-2019-02-28_0': 5,
+                     'clark-center-2019-02-28_1': 1,
+                     'clark-center-intersection-2019-02-28_0': 1,
+                     'cubberly-auditorium-2019-04-22_0': 1,  # small amount of rotation
+                     'forbes-cafe-2019-01-22_0': 1,
+                     'gates-159-group-meeting-2019-04-03_0': 1,
+                     'gates-to-clark-2019-02-28_1': 1,  # linear movement
+                     'memorial-court-2019-03-16_0': 1,
+                     'huang-2-2019-01-25_0': 1,
+                     'huang-basement-2019-01-25_0': 1,
+                     'meyer-green-2019-03-16_0': 1,  # some rotation and movement
+                     'nvidia-aud-2019-04-18_0': 1,  # small amount of rotation
+                     'packard-poster-session-2019-03-20_0': 1,  # some rotation and movement
+                     'tressider-2019-04-26_2': 1,}
+
     print(f"scene: {scene}")
     split = 'train' if scene in TRAIN else 'test'
 
@@ -121,37 +71,56 @@ def main(scene, args):
     # load all egomotions from all cameras
     use_droid = args.use_droid
     droid_or_dvpo = "droidslam" if use_droid else "dvpo"
-    egomotion = []
-    for cam_num in [0, 2, 4, 6, 8]:
+    egomotions_all = []
+    for cam_num in [0,2]:#, 2, 4, 6, 8]:
         if use_droid:
+            traj_path = f"../DROID-SLAM/reconstructions/{scene}_image{cam_num}/traj_est.npy"
             try:
-                egomotion.append(np.load(f"../DROID-SLAM/reconstructions/{scene}_image{cam_num}/traj_est.npy"))  # (num_frames, 7)
+                egomotions_all.append(np.load(traj_path))  # (num_frames, 7)
             except:
-                print(f"no DROID-SLAM results for {scene} image{cam_num}")
+                print(f"no DROID-SLAM results at {traj_path} ({scene} image{cam_num})")
                 continue
         else:
+            traj_path = f"../viz/wham-demo/{scene}_image_{cam_num}/slam_results.pth"
             try:
-                egomotion.append(joblib.load(f"../viz/wham-demo/{scene}_image_{cam_num}/slam_results.pth"))
+                egomotions_all.append(joblib.load(traj_path))
             except:
-                print(f"no dvpo results for {scene} image{cam_num}")
+                print(f"no dvpo results at {traj_path} ({scene} image{cam_num})")
                 continue
+    egomotions_all = np.stack(egomotions_all, axis=0)
 
-    egomotions_all = np.stack(egomotion, axis=0)
-    egomotion = egomotions_all.mean(0)
+    # rotate axes
+    scale = scene_to_scale_dvpo[scene]
+    egomotions_all[...,:3] = egomotions_all[:,:,[2,0,1]] * scale
 
-    additional_yaw = np.arange(5) * np.pi / 5
-    assert np.all(additional_yaw < 2 * np.pi), f"additional_yaw should be < 2 pi but is: {additional_yaw / np.pi} pi"
-    rotate_egomotion = np.array([[[np.cos(yaw), np.sin(yaw), 0],
-                                 [-np.sin(yaw), np.cos(yaw), 0],
-                                 [0,0,1]] for yaw in additional_yaw])
-    print(f"rotate_egomotion: {rotate_egomotion.shape}")
-    scale = 7.5
+    # swap y and z, then swap x and y, negate new y. we are going from:
+    ''' rotate the axes from DROID-SLAM coords to BEV coords
+        before:                       after:
+                z front                          up z
+               /                                 ^   x front
+              /                                  |  /
+             0 ------> x right                   | /
+             |                    left y <------ 0
+             |      
+             v      
+        down y
+    what I am doing right now:
+    z becomes x, y becomes z, x becomes -y '''
 
-    ego_positions_all = egomotions_all[:,:,[2,0,1]] * scale
-    print(f"ego_positions_all: {ego_positions_all.shape}")
-    ego_positions_all[:,:, 1] = -ego_positions_all[:,:, 1]  # negate prev-x-now-y
-    ego_positions_all[:,:, 2] = -ego_positions_all[:,:, 2]  # negate prev-y-now-z
+    egomotions_all[..., 1] = -egomotions_all[..., 1]  # negate prev-x-now-y
+    egomotions_all[..., 2] = -egomotions_all[..., 2]  # negate prev-y-now-z
 
+    # rotate by the rotation of the camera on the robot (2 * pi / 5 for 5 cams)
+    additional_yaw = -np.arange(5) * np.pi / 7
+    for ego_pos_i, (egomotion, yaw) in enumerate(zip(egomotions_all, additional_yaw)):
+        rotate_egomotion = np.array([[ np.cos(yaw), np.sin(yaw), 0],
+                                     [-np.sin(yaw), np.cos(yaw), 0],
+                                     [           0,           0, 1]])
+        egomotions_all[ego_pos_i,:,:3] = np.matmul(rotate_egomotion, egomotion[:,:3].T).T
+
+    egomotion_mean = egomotions_all.mean(0)
+
+    #### plot all cams in 3d
     fig = plt.figure()
     # axes = fig.add_subplot(221, projection='3d')
     axes = [fig.add_subplot(221, projection='3d'), fig.add_subplot(222, projection='3d'),
@@ -160,49 +129,28 @@ def main(scene, args):
     # four different views
     colors = ['r', 'g', 'b', 'c', 'm']
     for ax_i, (ax, (elev, azim)) in enumerate(zip(axes, zip([0, 15, 45, 70], [0, 40, 70, 90]))):
-        for ego_pos_i, ego_position in enumerate(ego_positions_all):
+        for ego_pos_i, egomotion in enumerate(egomotions_all):
             ax.view_init(elev=elev, azim=azim)
             ax.set_xlabel("x")
             ax.set_ylabel("y")
             ax.set_zlabel("z")
-            ax_set_up(ax, stuff=ego_positions_all.reshape(-1, 3))
-            ax.plot(*ego_position.T, color=colors[ego_pos_i], label=f"{ego_pos_i}")
+            ax_set_up(ax, stuff=egomotions_all[...,:3].reshape(-1, 3))
+            ax.plot(*egomotion[...,:3].T, color=colors[ego_pos_i], label=f"{ego_pos_i}")
+        ax.plot(*egomotion_mean[...,:3].T, color='k', label=f"avg")
         if ax_i == 2:
             ax.legend(loc='lower left', bbox_to_anchor=(0.9, 0.8))
 
     ego_traj_save_dir = f'../viz/jrdb_egomotion_{droid_or_dvpo}'
     if not os.path.exists(ego_traj_save_dir):
         os.makedirs(ego_traj_save_dir)
-    num_cams_available = ego_positions_all.shape[0]
+    num_cams_available = egomotions_all.shape[0]
     fig.savefig(f'{ego_traj_save_dir}/{scene}_3d_{num_cams_available}_cams.png')
     plt.close(fig)
 
     print("done saving plot of egomotions from all cameras")
-    return
 
     # (num_frames, 7)
-    assert len(image_list) == len(egomotion), f"len(image_list): {len(image_list)}, len(egomotion): {len(egomotion)}"
-
-    scale = 7.5  # figure out a better way to calculate this
-
-    # swap y and z, then swap x and y, negate new y. we are going from:
-    ''' rotate the axes from DROID-SLAM coords to BEV coords
-       after:                            before:
-                   up z                       z front                          
-                      ^   x front            /                                  
-                      |  /                  /                          
-                      | /                  0 ------> x right                          
-       left y <------ 0                    |                          
-                                           |      
-                                           v      
-                                      down y      
-    what I am doing right now:
-    z becomes x, y becomes z, x becomes -y
-    '''
-    ego_positions = egomotion[:,[2,0,1]] * scale
-    ego_positions[:, 1] = -ego_positions[:, 1]  # negate prev-x-now-y
-    ego_positions[:, 2] = -ego_positions[:, 2]  # negate prev-y-now-z
-    ego_rotations = egomotion[:, 3:]
+    assert len(image_list) == egomotions_all.shape[1], f"len(image_list): {len(image_list)}, len(egomotion): {egomotions_all.shape[1]}"
 
     # okay from here it's plotting the ego-motion adjusted 2d BEV trajectories
     # load BEV 2d trajs
@@ -215,16 +163,20 @@ def main(scene, args):
         f"len(df['frame'].unique()): {len(df['frame'].unique())}, len(image_list): {len(image_list)}"
 
     # only keep the first BEV coords of the ego positions
-    ego_positions = ego_positions[:,:2]
-    # confirm same length as existing trajectories
-    assert len(ego_positions) == len(df['frame'].unique()), \
-        f"len(positions): {len(ego_positions)}, len(df['frame'].unique()): {len(df['frame'].unique())}"
+    # ego_positions = egomotion_mean[...,:2]
+    # ego_rotations = egomotion_mean[..., 3:]
+    ego_positions = egomotions_all[0,...,:2]
+    ego_rotations = egomotions_all[0,..., 3:]
 
-    def rotation_matrix(orientation, additional_yaw=0):
+    # confirm same length as existing trajectories
+    assert egomotions_all.shape[1] == len(df['frame'].unique()), \
+        f"egomotions_all: {egomotions_all.shape[1]}, len(df['frame'].unique()): {len(df['frame'].unique())}"
+
+    def rotation_matrix(orientation):
         # (using camera coords, the pitch is the rotation along the x-z plane, around the y-axis
         yaw = Quaternion(*orientation).yaw_pitch_roll[1]
-        return np.array([[np.cos(yaw+additional_yaw), np.sin(yaw+additional_yaw)],
-                         [-np.sin(yaw+additional_yaw), np.cos(yaw+additional_yaw)]])  # negate, the y-axis points downward
+        return np.array([[np.cos(yaw), np.sin(yaw)],
+                         [-np.sin(yaw), np.cos(yaw)]])  # negate, the y-axis points downward
 
     # Apply rotation
     frame_to_ego_rot_mat = {frame: rotation_matrix(ego_rotations[i]) for i, frame in enumerate(df['frame'].unique())}
@@ -274,8 +226,9 @@ def main(scene, args):
         ax.set_aspect('equal')
         ax.set_title(f"scene: {scene}, frame: {frame}")
         # other peds
-        for _, row in trajectories.iterrows():
+        for _, row in trajectories.iterrows():  # for each ped
             ax.scatter(row['x'], row['y'], s=10, color=color_dict[row['id']])
+            ax.annotate(int(row['id']), (row['x'], row['y']), fontsize=6)
         # ego agent
         ax.add_artist(plt.Circle(ego_pos[:2], radius=0.5, color='red', fill=True))
         # ego path
@@ -300,13 +253,16 @@ def main(scene, args):
         # ego rotation
         ax1.add_artist(plt.Arrow(0,0, 10, 0, width=1, color='red'))
 
-        # save fig
-        # if t == 0:
-        #     plt.savefig(f'{ego_traj_save_dir}/{scene}_temp_2d.png')
         plt.tight_layout()
         fig.canvas.draw()
         plot_image = np.frombuffer(fig.canvas.tostring_rgb(), dtype='uint8')
         plot_image = plot_image.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+
+        # save fig
+        # if t == 0:
+        #     plt.savefig(f'{ego_traj_save_dir}/{scene}_temp_2d.png')
+        #     import ipdb; ipdb.set_trace()
+
         frames.append(plot_image)
         plt.close(fig)
 
@@ -330,7 +286,7 @@ def main(scene, args):
 if __name__ == '__main__':
     __spec__ = None
     argparser = argparse.ArgumentParser()
-    argparser.add_argument('--use_droid', action='store_true')
+    argparser.add_argument('--use_droid', '-ud', action='store_true')
     argparser.add_argument('--mp', action='store_true')
     args = argparser.parse_args()
 
@@ -374,5 +330,5 @@ if __name__ == '__main__':
         with mp.Pool(60) as p:
             p.starmap(main, list_of_args)
     else:
-        scene = 'bytes-cafe-2019-02-07_0'#'tressider-2019-04-26_3'
+        scene = 'clark-center-2019-02-28_0'#'bytes-cafe-2019-02-07_0'##'tressider-2019-04-26_2'#
         main(scene, args)
