@@ -309,44 +309,41 @@ def run(cfg,
         logger.info(f'Already processed data exists at {output_pth} ! Load the data .')
 
     #### PART 2: 3d pose lifting and move poses from camera coords to world coords
-    if (osp.exists(osp.join(output_pth, "results.pth")) and
-            osp.exists(osp.join(output_pth, 'output.mp4'))):
-        logger.info(f'3d pose est results already saved at {output_pth}')
-        return
+    if not osp.exists(osp.join(output_pth, "results.pth")):
+        # Build dataset
+        dataset = CustomDataset(cfg, tracking_results, slam_results, width, height, fps)
 
-    # Build dataset
-    dataset = CustomDataset(cfg, tracking_results, slam_results, width, height, fps)
+        # run WHAM
+        results = defaultdict(dict)
 
-    # run WHAM
-    results = defaultdict(dict)
+        for batch in dataset:
+            if batch is None: break
 
-    for batch in dataset:
-        if batch is None: break
+            # data
+            _id, x, inits, features, mask, init_root, cam_angvel, frame_id, kwargs = batch
 
-        # data
-        _id, x, inits, features, mask, init_root, cam_angvel, frame_id, kwargs = batch
+            # inference
+            pred = network(x, inits, features, mask=mask, init_root=init_root, cam_angvel=cam_angvel, return_y_up=True,
+                           **kwargs)
 
-        # inference
-        pred = network(x, inits, features, mask=mask, init_root=init_root, cam_angvel=cam_angvel, return_y_up=True,
-                       **kwargs)
+            # Store results
+            results[_id]['poses_body'] = pred['poses_body'].detach().cpu().squeeze(0).numpy()
+            results[_id]['poses_root_cam'] = pred['poses_root_cam'].detach().cpu().squeeze(0).numpy()
+            results[_id]['betas'] = pred['betas'].detach().cpu().squeeze(0).numpy()
+            results[_id]['verts_cam'] = (pred['verts_cam'] + pred['trans_cam'].unsqueeze(1)).detach().cpu().numpy()
+            results[_id]['poses_root_world'] = pred['poses_root_world'].detach().cpu().squeeze(0).numpy()
+            results[_id]['trans_world'] = pred['trans_world'].detach().cpu().squeeze(0).numpy()
+            results[_id]['frame_id'] = frame_id
 
-        # Store results
-        results[_id]['poses_body'] = pred['poses_body'].detach().cpu().squeeze(0).numpy()
-        results[_id]['poses_root_cam'] = pred['poses_root_cam'].detach().cpu().squeeze(0).numpy()
-        results[_id]['betas'] = pred['betas'].detach().cpu().squeeze(0).numpy()
-        results[_id]['verts_cam'] = (pred['verts_cam'] + pred['trans_cam'].unsqueeze(1)).detach().cpu().numpy()
-        results[_id]['poses_root_world'] = pred['poses_root_world'].detach().cpu().squeeze(0).numpy()
-        results[_id]['trans_world'] = pred['trans_world'].detach().cpu().squeeze(0).numpy()
-        results[_id]['frame_id'] = frame_id
+        # save results
+        joblib.dump(results, osp.join(output_pth, 'results.pth'))
+        logger.info(f'Save results at {output_pth}')
 
     # Visualize
-    if visualize:
+    if visualize and not osp.exists(osp.join(output_pth, 'output.mp4')):
+        results = joblib.load(osp.join(output_pth, 'results.pth'))
         from lib.vis.run_vis import run_vis_on_demo
         run_vis_on_demo(cfg, video, results, output_pth, network.smpl, vis_global=run_global)
-
-    # save results
-    joblib.dump(results, osp.join(output_pth, 'results.pth'))
-    logger.info(f'Save results at {output_pth}')
 
 
 if __name__ == '__main__':
@@ -362,10 +359,10 @@ if __name__ == '__main__':
     parser.add_argument('--calib', type=str, default=None,
                         help='Camera calibration file path')
 
-    parser.add_argument('--estimate_local_only', action='store_true',
+    parser.add_argument('--estimate_local_only', '-lo', action='store_true',
                         help='Only estimate motion in camera coordinate if True')
 
-    parser.add_argument('--visualize', action='store_true',
+    parser.add_argument('--visualize', '-v', action='store_true',
                         help='Visualize the output mesh if True')
 
     parser.add_argument('--dont_use_gt_poses', dest='use_gt_poses', action='store_false')#true')
@@ -395,60 +392,75 @@ if __name__ == '__main__':
                      'packard-poster-session-2019-03-20_0',  # some rotation and movement
                      'tressider-2019-04-26_2',]
 
-    for scene in with_movement:
-        # if 'clark-center-2' not in scene:
-        # if 'clark-center-i' not in scene and 'forbes' not in scene:
-        # if 'cubberly' not in scene and 'memorial' not in scene:
-        if 'gates' not in scene:
-        # if 'huang' not in scene:
-        # if 'meyer' not in scene and 'nvidia' not in scene:
-        # if 'packard' not in scene and 'tressider' not in scene:
-            continue
-        print(f"scene: {scene}")
-        scene = f"{scene}_image_0.mp4"
-        input_vid_dir = "../viz/wham_input_vids"
-        args.video = f"{input_vid_dir}/{scene}"
+    no_movement = ['bytes-cafe-2019-02-07_0',
+                   'gates-ai-lab-2019-02-08_0',
+                   'gates-basement-elevators-2019-01-17_1',
+                   'hewlett-packard-intersection-2019-01-24_0',
+                   'huang-lane-2019-02-12_0',
+                   'jordan-hall-2019-04-22_0',
+                   'packard-poster-session-2019-03-20_1',
+                   'packard-poster-session-2019-03-20_2',
+                   'stlc-111-2019-04-19_0',
+                   'svl-meeting-gates-2-2019-04-08_0',
+                   'svl-meeting-gates-2-2019-04-08_1',  # impercitible slight rotation
+                   'tressider-2019-03-16_0',
+                   'tressider-2019-03-16_1', ]
 
-        logger.info(f'GPU name -> {torch.cuda.get_device_name()}')
-        logger.info(f'GPU feat -> {torch.cuda.get_device_properties("cuda")}')
+    for camera_num in range(0, 9, 2):
+        for scene in no_movement:#with_movement:
+            # if 'clark-center-2' not in scene:
+            # if 'clark-center-i' not in scene and 'forbes' not in scene:
+            # if 'cubberly' not in scene and 'memorial' not in scene:
+            # if 'gates' not in scene:
+            # if 'huang' not in scene:
+            # if 'meyer' not in scene and 'nvidia' not in scene:
+            # if 'packard' not in scene and 'tressider' not in scene:
+            #     continue
+            print(f"scene: {scene}")
+            scene = f"{scene}_image_{camera_num}.mp4"
+            input_vid_dir = "../viz/wham_input_vids"
+            args.video = f"{input_vid_dir}/{scene}"
 
-        # ========= Load WHAM ========= #
-        smpl_batch_size = cfg.TRAIN.BATCH_SIZE * cfg.DATASET.SEQLEN
-        smpl = build_body_model(cfg.DEVICE, smpl_batch_size)
-        network = build_network(cfg, smpl)
-        network.eval()
+            logger.info(f'GPU name -> {torch.cuda.get_device_name()}')
+            logger.info(f'GPU feat -> {torch.cuda.get_device_properties("cuda")}')
 
-        # Output folder
-        sequence = args.video.split('/')[-1].split('.')[0]  # '.'.join(args.video.split('/')[-1].split('.')[:-1])
-        output_pth = osp.join(args.output_pth, sequence)
-        os.makedirs(output_pth, exist_ok=True)
+            # ========= Load WHAM ========= #
+            smpl_batch_size = cfg.TRAIN.BATCH_SIZE * cfg.DATASET.SEQLEN
+            smpl = build_body_model(cfg.DEVICE, smpl_batch_size)
+            network = build_network(cfg, smpl)
+            network.eval()
 
-        # load camera calibration params
-        jrdb_calib_path = 'jrdb/train/calibration/cameras.yaml'
-        camera_num = int(scene.split("_")[-1].split('.')[0])
+            # Output folder
+            sequence = args.video.split('/')[-1].split('.')[0]  # '.'.join(args.video.split('/')[-1].split('.')[:-1])
+            output_pth = osp.join(args.output_pth, sequence)
+            os.makedirs(output_pth, exist_ok=True)
 
-        with open(jrdb_calib_path) as f:
-            camera_config_dict = yaml.safe_load(f)
+            # load camera calibration params
+            jrdb_calib_path = 'jrdb/train/calibration/cameras.yaml'
+            camera_num = int(scene.split("_")[-1].split('.')[0])
 
-        camera_params = camera_config_dict['cameras'][f'sensor_{camera_num}']
-        K = camera_params['K'].split(' ')
-        fx, fy, cx, cy = K[0], K[2], K[4], K[5]
-        calib_params = list(map(float, [fx, fy, cx, cy, *camera_params['D'].split(' ')]))  # intrinsic + distortion
+            with open(jrdb_calib_path) as f:
+                camera_config_dict = yaml.safe_load(f)
 
-        args.calib = osp.join(output_pth, 'calib.txt')
-        if not osp.exists(args.calib):
-            with open(args.calib, 'w') as fopen:
-                print(" ".join(map(str, calib_params)))
-                fopen.write(" ".join(map(str, calib_params)))
+            camera_params = camera_config_dict['cameras'][f'sensor_{camera_num}']
+            K = camera_params['K'].split(' ')
+            fx, fy, cx, cy = K[0], K[2], K[4], K[5]
+            calib_params = list(map(float, [fx, fy, cx, cy, *camera_params['D'].split(' ')]))  # intrinsic + distortion
 
-        with torch.no_grad():
-            run(cfg,
-                args.video,
-                output_pth,
-                network,
-                args.calib,
-                run_global=not args.estimate_local_only,
-                visualize=args.visualize)
+            args.calib = osp.join(output_pth, 'calib.txt')
+            if not osp.exists(args.calib):
+                with open(args.calib, 'w') as fopen:
+                    print(" ".join(map(str, calib_params)))
+                    fopen.write(" ".join(map(str, calib_params)))
 
-        print()
-        logger.info('Done !')
+            with torch.no_grad():
+                run(cfg,
+                    args.video,
+                    output_pth,
+                    network,
+                    args.calib,
+                    run_global=not args.estimate_local_only,
+                    visualize=args.visualize)
+
+            print()
+            logger.info('Done !')

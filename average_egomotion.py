@@ -43,13 +43,13 @@ def ax_set_up(ax, stuff):
 
 
 def main(scene, args):
-    scene_to_scale_dvpo = {'clark-center-2019-02-28_0': 5,
+    scene_to_scale_dvpo = {
                      'clark-center-2019-02-28_1': 1,
                      'clark-center-intersection-2019-02-28_0': 1,
                      'cubberly-auditorium-2019-04-22_0': 1,  # small amount of rotation
                      'forbes-cafe-2019-01-22_0': 1,
                      'gates-159-group-meeting-2019-04-03_0': 1,
-                     'gates-to-clark-2019-02-28_1': 1,  # linear movement
+                     'gates-to-clark-2019-02-28_1': 5,  # linear movement
                      'memorial-court-2019-03-16_0': 1,
                      'huang-2-2019-01-25_0': 1,
                      'huang-basement-2019-01-25_0': 1,
@@ -330,5 +330,5 @@ if __name__ == '__main__':
         with mp.Pool(60) as p:
             p.starmap(main, list_of_args)
     else:
-        scene = 'clark-center-2019-02-28_0'#'bytes-cafe-2019-02-07_0'##'tressider-2019-04-26_2'#
+        scene = 'gates-to-clark-2019-02-28_1'#'clark-center-2019-02-28_0'#'bytes-cafe-2019-02-07_0'##'tressider-2019-04-26_2'#
         main(scene, args)
