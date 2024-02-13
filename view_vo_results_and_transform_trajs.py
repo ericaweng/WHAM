@@ -1,4 +1,4 @@
-""" show wham slam results on 2d BEV jrdb data """
+""" show dvpo (used by wham), droid-slam, and rosbag gt egomotion results on 2d BEV jrdb data """
 
 import sys
 import yaml
@@ -119,59 +119,22 @@ def main(scene, args, cam_num):
     images = [cv2.imread(os.path.join(image_dir, imfile)) for imfile in image_list]
 
     use_droid = args.use_droid
-    droid_or_dvpo = "droidslam" if use_droid else "dvpo"
+    droid_or_dvpo = "droidslam" if use_droid else "dvpo" if use_droid == 'dvpo' else 'rosbag'
     if use_droid:
         try:
             egomotion = np.load(f"../DROID-SLAM/reconstructions/{scene}/traj_est.npy")  # (num_frames, 7)
         except:
             print(f"no DROID-SLAM results for {scene}")
             return
-    else:
+    elif use_droid:
         try:
             egomotion = joblib.load(f"../viz/wham-demo/{scene}_image_{cam_num}/slam_results.pth")
         except:
             print(f"no dvpo results for {scene}")
             return
+
     # (num_frames, 7)
     assert len(image_list) == len(egomotion), f"len(image_list): {len(image_list)}, len(egomotion): {len(egomotion)}"
-
-    ###### calculate slam scale factor based on ratio between avg height of 2d bboxes and 3d bboxes
-    # dataroot_labels = f"/home/eweng/code/PoseFormer/datasets/jackrabbot/train/labels/labels_2d/"
-    # labels_path = os.path.join(dataroot_labels, f'{scene_name_w_image}.json')
-    # with open(labels_path, 'r') as f:
-    #     labels_all_frames_2d = json.load(f)['labels']
-    # dataroot_labels = f"/home/eweng/code/PoseFormer/datasets/jackrabbot/train/labels/labels_3d/"
-    # labels_path = os.path.join(dataroot_labels, f'{scene_name_w_image}.json')
-    # with open(labels_path, 'r') as f:
-    #     labels_all_frames_3d = json.load(f)['labels']
-    #
-    # # gather all ratios from 2d and 3d bounding boxes
-    # all_ratios = []
-    # for (_, labels_2d), (_, labels_3d) in zip(sorted(labels_all_frames_2d.items()), sorted(labels_all_frames_3d.items())):
-    #     ratios = {}
-    #     assert len(labels_2d) == len(labels_3d), f"len(labels_2d): {len(labels_2d)}, len(labels_3d): {len(labels_3d)}"
-    #     for label_2d, label_3d in zip(sorted(labels_2d), sorted(labels_3d)):
-    #         ped_id = int(label_2d['label_id'].split(":")[-1])
-    #         assert len(label_2d['box']) == len(label_3d['box']), f"len(label_2d['box']): {len(label_2d['box'])}, len(label_3d['box']): {len(label_3d['box'])}"
-    #         assert ped_id == int(label_3d['label_id'].split(":")[-1]), f"ped_id: {ped_id}, int(label_3d['label_id'].split(':')[-1]): {int(label_3d['label_id'].split(':')[-1])}"
-    #         h2 = label_2d['box'][3]
-    #         h3 = label_3d['box']['h']
-    #         ratios[ped_id] = h3 / h2  # multiply by this ratio to convert image scale (pixels) to real-life scale (m)
-    #     print(ratios.values())
-    #     all_ratios.append(ratios)
-
-    ###### calculate slam scale factor based on avg agent velocity?
-    # plot distribution of velocities for all peds in this scene
-    # hist = (df.groupby('id').apply(lambda x: np.linalg.norm(np.diff(x[['x', 'y']].values, axis=0), axis=1).mean()) * 2.5).values
-    # fig, ax = plt.subplots()
-    # ax.hist(hist)
-    # ego_traj_save_dir = f'../viz/jrdb-egomotion-{droid_or_dvpo}'
-    # plt.savefig(f'{ego_traj_save_dir}/{scene}_ped_velocities_hist.png')
-    # plt.close(fig)
-    # import ipdb; ipdb.set_trace()
-    # scale = np.mean()
-
-    scale = 7.5  # figure out a better way to calculate this
 
     # swap y and z, then swap x and y, negate new y. we are going from:
     ''' rotate the axes from DROID-SLAM coords to BEV coords
@@ -345,21 +308,6 @@ if __name__ == '__main__':
     argparser.add_argument('--mp', action='store_true')
     args = argparser.parse_args()
 
-    # TRAIN only
-    with_movement = ['clark-center-2019-02-28_0',
-                     'clark-center-2019-02-28_1',
-                     'clark-center-intersection-2019-02-28_0',
-                     'cubberly-auditorium-2019-04-22_0',  # small amount of rotation
-                     'forbes-cafe-2019-01-22_0',
-                     'gates-159-group-meeting-2019-04-03_0',
-                     'gates-to-clark-2019-02-28_1',  # linear movement
-                     'memorial-court-2019-03-16_0',
-                     'huang-2-2019-01-25_0',
-                     'huang-basement-2019-01-25_0',
-                     'meyer-green-2019-03-16_0',  # some rotation and movement
-                     'nvidia-aud-2019-04-18_0',  # small amount of rotation
-                     'packard-poster-session-2019-03-20_0',  # some rotation and movement
-                     'tressider-2019-04-26_2', ]
 
     no_movement = ['bytes-cafe-2019-02-07_0',
                    'gates-ai-lab-2019-02-08_0',

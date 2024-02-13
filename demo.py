@@ -159,6 +159,7 @@ def box_to_2d_corners(box):
     y0, y1 = y, y + h
     return np.array([x0, y0, x1, y1])
 
+# COCO 2d / 3d
 CONNECTIVITIES_LIST = [[1, 2], [0, 4], [3, 4], [8, 10], [5, 7], [10, 13], [14, 16], [4, 5], [7, 12], [4, 8], [3, 6], [13, 15], [11, 14], [6, 9], [8, 11]]
 
 def show_image(image, bboxes=None, poses_gt=None, poses_est=None):

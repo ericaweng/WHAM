@@ -1,3 +1,5 @@
+""" Calculate egomotion for jrdb scenes that have static pedestrians throughout the entire scene via linear optimization method. """
+
 import imageio
 import pandas as pd
 import glob
@@ -236,7 +238,8 @@ def main(scene, scene_to_list_of_static_ped_ids, args):
         # delta_x, delta_y = ego_positions[:, 0], ego_positions[:, 1]
         # rotations = smooth_rotations(rotations, sigma=1)
 
-        ###
+        ####
+
         for t, static_peds_this_frame in static_peds_groupby:
             joined = static_peds_this_frame.merge(init_static_poses, on='id', suffixes=('','_init'), how='inner')
             curr_ts_poses = joined[['x', 'y']].values
@@ -297,7 +300,7 @@ def main(scene, scene_to_list_of_static_ped_ids, args):
     colors = plt.cm.jet(np.linspace(0, 1, len(unique_ids)))
     color_dict = dict(zip(unique_ids, colors))
 
-    skip = 3
+    skip = 1
     if args.visualize:
         frames = []
         items = list(enumerate(zip(ego_positions, df.groupby('frame'), df_ego.groupby('frame'))))[::skip]
@@ -331,18 +334,20 @@ def main(scene, scene_to_list_of_static_ped_ids, args):
                 ax.scatter(row['x'], row['y'], s=10, color=color_dict[row['id']])
                 ax.annotate(int(row['id']), (row['x'], row['y']), fontsize=6)
                 # plot agent rotations
-                ax.arrow(row['x'], row['y'], np.cos(row['heading']), np.sin(row['heading']), head_width=0.1, head_length=0.1, fc='m', ec='m')
+                ax.arrow(row['x'], row['y'], -np.cos(row['heading']), np.sin(row['heading']), head_width=0.1, head_length=0.1, fc='m', ec='m')
 
             # ego agent
             ax.add_artist(plt.Circle(ego_pos[:2], radius=0.5, color='red', fill=True))
             # ego path
             ax.plot(ego_positions[:t, 0], ego_positions[:t, 1], color='red')
             # ego rotation
-            rot_mat = frame_to_ego_rot_mat[frame]
-            theta = np.arctan2(-rot_mat[1, 0], rot_mat[0, 0]) / np.pi
-            theta = str(round(theta, 2)) + " pi"
-            ax.add_artist(plt.Arrow(ego_pos[0], ego_pos[1], 5*rot_mat[0,0], -5*rot_mat[1,0], width=1, color='red'))
-            ax.text(ax.get_xlim()[0], ax.get_ylim()[0], f"ego-agent pos: {round(ego_pos[0],1), round(ego_pos[1],1)}, {theta}", fontsize=12, color='black')
+            # rot_mat = frame_to_ego_rot_mat[frame]
+            # theta = np.arctan2(-rot_mat[1, 0], rot_mat[0, 0]) / np.pi
+            # theta = str(round(theta, 2)) + " pi"
+            theta = rotations[t]
+            theta_str = str(round(theta, 2)) + " pi"
+            ax.add_artist(plt.Arrow(ego_pos[0], ego_pos[1], 5*np.cos(theta), 5*np.sin(theta), width=1, color='red'))
+            ax.text(ax.get_xlim()[0], ax.get_ylim()[0], f"ego-agent pos: {round(ego_pos[0],1), round(ego_pos[1],1)}, {theta_str}", fontsize=12, color='black')
 
             # ego perspective
             ax1.imshow(images_8[t][...,[2,1,0]])  # RGB to BGR
