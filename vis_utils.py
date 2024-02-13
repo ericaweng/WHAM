@@ -46,8 +46,8 @@ def visualize_BEV_trajs(df, images_0, images_2, images_4, images_6, images_8,
         ax_im1.set_title(f"cam 4")
         ax_im0.imshow(cv2.imread(images_6[t])[..., [2, 1, 0]])  # RGB to BGR
         ax_im0.set_title(f"cam 6")
-        ax1.imshow(cv2.imread(images_8[t])[..., [2, 1, 0]])  # RGB to BGR
-        ax1.set_title(f"cam 8")
+        # ax1.imshow(cv2.imread(images_8[t])[..., [2, 1, 0]])  # RGB to BGR
+        # ax1.set_title(f"cam 8")
 
         # global perspective
         ax.set_xlim(min_x, max_x)
@@ -65,14 +65,14 @@ def visualize_BEV_trajs(df, images_0, images_2, images_4, images_6, images_8,
             EGO_ID = 1000
             if row['id'] == EGO_ID:  # ego-agent
                 # ego agent
-                ego_pos =  trajectories[(trajectories['id'] == EGO_ID) & (trajectories['frame'] == t)][['x', 'y']].values
+                ego_pos = trajectories[trajectories['id'] == EGO_ID][['x', 'y']].values
                 assert ego_pos.shape[0] == 1, f"ego_pos.shape: {ego_pos.shape}"
                 ego_pos = ego_pos.squeeze()
                 ax.add_artist(plt.Circle(ego_pos, radius=0.5, color='red', fill=True))
                 # ego path
-                xs = trajectories[(trajectories['id'] == EGO_ID) & (trajectories['frame'] <= t)]['x'].values
-                ys = trajectories[(trajectories['id'] == EGO_ID) & (trajectories['frame'] <= t)]['y'].values
-                theta = trajectories[(trajectories['id'] == EGO_ID) & (trajectories['frame'] == t)]['heading'].values.item()
+                xs = df[(df['id'] == EGO_ID) & (df['frame'] <= t)]['x'].values
+                ys = df[(df['id'] == EGO_ID) & (df['frame'] <= t)]['y'].values
+                theta = df[(df['id'] == EGO_ID) & (df['frame'] == t)]['heading'].values.item()
                 ax.plot(xs, ys, color='red')
                 # ego rotation
                 theta_str = str(np.round(theta, 2)) + " pi"
@@ -80,6 +80,19 @@ def visualize_BEV_trajs(df, images_0, images_2, images_4, images_6, images_8,
                 ax.text(ax.get_xlim()[0], ax.get_ylim()[0],
                         f"ego-agent pos: {round(ego_pos[0], 1), round(ego_pos[1], 1)}, {theta_str}", fontsize=12,
                         color='black')
+
+        # egomotion
+        # ax1.set_xlim(min_x_ego, max_x_ego)
+        # ax1.set_ylim(min_y_ego, max_y_ego)
+        # ax1.set_aspect('equal')
+        # ax.set_title(f"scene: {scene}, frame: {frame}")
+        # # other static_peds_this_frame
+        # for _, row in trajectories_ego.iterrows():
+        #     ax1.scatter(row['x'], row['y'], s=10, color=color_dict[row['id']])
+        # # ego-agent
+        # ax1.add_artist(plt.Circle((0,0), radius=0.5, color='red', fill=True))
+        # # ego rotation
+        # ax1.add_artist(plt.Arrow(0,0, 10, 0, width=1, color='red'))
 
         # save fig
         plt.tight_layout()

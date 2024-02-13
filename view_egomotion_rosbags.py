@@ -131,8 +131,8 @@ def main(scene, args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--egomotion_savedir', '-es', type=str, default=f"'jrdb/rosbag_egomotion_imu'")
-    parser.add_argument('--viz_save_dir', '-vs', type=str, default=f'../viz/rosbag_imu')
+    parser.add_argument('--egomotion_savedir', '-es', type=str, default=f"'jrdb/rosbag_egomotion_odom'")
+    parser.add_argument('--viz_save_dir', '-vs', type=str, default=f'../viz/rosbag_odom')
     args = parser.parse_args()
 
     for scene in WITH_MOVEMENT:
