@@ -69,7 +69,12 @@ class CustomDataset(torch.utils.data.Dataset):
         kp2d = torch.from_numpy(self.tracking_results[index]['keypoints']).float()
         mask = kp2d[..., -1] < KEYPOINTS_THR
         bbox = torch.from_numpy(self.tracking_results[index]['bbox']).float()
-        
+
+        print(f"res: {self.res.shape}")
+        print(f"kp2d: {kp2d.shape}")
+        print(f"bbox: {bbox.shape}")
+        import ipdb; ipdb.set_trace()
+
         norm_kp2d, _ = self.keypoints_normalizer(
             kp2d[..., :-1].clone(), self.res, self.intrinsics, 224, 224, bbox
         )
@@ -85,15 +90,27 @@ class CustomDataset(torch.utils.data.Dataset):
             pose2rot=False,
             return_full_pose=True
         )
+        # print(f"init_output.joints[:, :17]: {init_output.joints[:, :17].shape}")
+        # from viz import show_image, COCO_CONNECTIVITY, H36M_CONNECTIVITY, draw_pose_3d_single_frame
+        # import matplotlib.pyplot as plt
+        # fig = plt.figure()
+        # ax = fig.add_subplot(111, projection='3d')
+        # draw_pose_3d_single_frame(init_output.joints[:, :17], ax=ax, color='b', text=True, azim=0, elev=45, connectivities=COCO_CONNECTIVITY)
+        # plt.show()
         init_kp3d = root_centering(init_output.joints[:, :17], 'coco')
+        # plt.close('all')
+        # fig = plt.figure()
+        # ax = fig.add_subplot(111, projection='3d')
+        # draw_pose_3d_single_frame(init_kp3d, ax=ax, color='b', text=True, azim=0, elev=45)
+        # plt.show()
         init_kp = torch.cat((init_kp3d.reshape(1, -1), norm_kp2d[0].clone().reshape(1, -1)), dim=-1)
         init_smpl = transforms.matrix_to_rotation_6d(init_output.full_pose)
         init_root = transforms.matrix_to_rotation_6d(init_output.global_orient)
-        
+
         # Process SLAM results
         cam_angvel = convert_dpvo_to_cam_angvel(self.slam_results, self.fps)
         
-        return (
+        to_return = (
             index,                                          # subject id
             self._to(norm_kp2d),                            # 2d keypoints
             (self._to(init_kp), self._to(init_smpl)),       # initial pose
@@ -106,3 +123,14 @@ class CustomDataset(torch.utils.data.Dataset):
              'bbox': self._to(bbox),
              'res': self._to(self.res)},
             )
+        # print("dataset shape")
+        print(f"norm_kp2d: {norm_kp2d.shape}")
+        # print("2d_keypoints: ", norm_kp2d.shape)
+        print("init_kp: ", init_kp.shape)
+        # print("init_smpl: ", init_smpl.shape)
+        # print("features: ", features.shape)
+        # print("mask: ", mask.shape)
+        # print()
+        import ipdb; ipdb.set_trace()
+
+        return to_return

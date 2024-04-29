@@ -7,7 +7,7 @@ from torch import nn
 
 from configs import constants as _C
 from lib.utils import transforms
-from lib.models.layers import (MotionEncoder, MotionDecoder, TrajectoryDecoder, TrajectoryRefiner, Integrator, 
+from lib.models.layers import (MotionEncoder, MotionDecoder, TrajectoryDecoder, TrajectoryRefiner, Integrator,
                                rollout_global_motion, compute_camera_pose, reset_root_velocity, compute_camera_motion)
 
 
@@ -31,13 +31,20 @@ class Network(nn.Module):
         self.mask_embedding = nn.Parameter(torch.zeros(1, 1, n_joints, 2))        
         
         # Module 1. Motion Encoder
-        self.motion_encoder = MotionEncoder(in_dim=in_dim, 
+        self.motion_encoder = MotionEncoder(in_dim=in_dim,
                                             d_embed=d_embed,
                                             pose_dr=pose_dr,
                                             rnn_type=rnn_type,
                                             n_layers=n_layers,
                                             n_joints=n_joints)
-        
+        print(f"motion encoder params:")
+        print(f"in_dim: {in_dim}")
+        print(f"d_embed: {d_embed}")
+        print(f"pose_dr: {pose_dr}")
+        print(f"rnn_type: {rnn_type}")
+        print(f"n_layers: {n_layers}")
+        print(f"n_joints: {n_joints}")
+
         self.trajectory_decoder = TrajectoryDecoder(d_embed=d_context,
                                                     rnn_type=rnn_type,
                                                     n_layers=n_layers)

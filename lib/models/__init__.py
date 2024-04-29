@@ -18,6 +18,41 @@ def build_body_model(device, batch_size=1, gender='neutral', **kwargs):
     return body_model
 
 
+def build_motion_encoder(cfg):
+    from lib.models.layers import MotionEncoder
+
+    with open(cfg.MODEL_CONFIG, 'r') as f:
+        model_config = yaml.safe_load(f)
+    model_config.update({'d_feat': _C.IMG_FEAT_DIM[cfg.MODEL.BACKBONE]})
+
+    d_embed = model_config['d_embed']
+    pose_dr = model_config['pose_dr']
+    rnn_type = model_config['layer']
+    n_layers = model_config['n_layers']
+    n_joints = _C.KEYPOINTS.NUM_JOINTS
+    in_dim = n_joints * 2 + 3
+
+    # Module 1. Motion Encoder
+    network = MotionEncoder(in_dim=in_dim,
+                            d_embed=d_embed,
+                            pose_dr=pose_dr,
+                            rnn_type=rnn_type,
+                            n_layers=n_layers,
+                            n_joints=n_joints).to(cfg.DEVICE)
+
+    # Load Checkpoint
+    if os.path.isfile(cfg.TRAIN.CHECKPOINT):
+        checkpoint = torch.load(cfg.TRAIN.CHECKPOINT)
+        model_state_dict = {k.split('motion_encoder.')[-1]: v
+                            for k, v in checkpoint['model'].items() if 'motion_encoder' in k}
+        network.load_state_dict(model_state_dict, strict=False)
+        logger.info(f"=> loaded checkpoint '{cfg.TRAIN.CHECKPOINT}' ")
+    else:
+        logger.info(f"=> Warning! no checkpoint found at '{cfg.TRAIN.CHECKPOINT}'.")
+
+    return network
+
+
 def build_network(cfg, smpl):
     from .wham import Network
     

@@ -42,6 +42,8 @@ def main(scene, args):
     assert len(df['frame'].unique()) == len(images_0), \
         f"len(df['frame'].unique()): {len(df['frame'].unique())}, len(image_list): {len(images_0)}"
 
+    df_ego = df.copy()
+
     ego_positions = np.zeros((len(images_0), 2))
     ego_rotations = np.zeros(len(images_0))
     if args.egomotion_dir is not None:
@@ -77,15 +79,15 @@ def main(scene, args):
         rot_map = pd.Series(ego_rotations, index=df['frame'].unique())
         df['heading'] = df['heading'] + df['frame'].map(rot_map)
 
-
     # add egomotion in as an additional pedestrian to the df
-    ego_ped_id = 1000
-    ego_ped_df = pd.DataFrame(
-            {'frame': np.arange(len(images_0)), 'id': ego_ped_id, 'x': ego_positions[:, 0],
-             'y': ego_positions[:, 1],
-             'heading': ego_rotations})
-    df = pd.concat([df, ego_ped_df], ignore_index=True)
-    df = df.sort_values(by=['frame', 'id']).reset_index(drop=True)
+    EGO_ID = 1000
+    if EGO_ID not in df['id'].unique():
+        ego_ped_df = pd.DataFrame(
+                {'frame': np.arange(len(images_0)), 'id': EGO_ID, 'x': ego_positions[:, 0],
+                 'y': ego_positions[:, 1],
+                 'heading': ego_rotations})
+        df = pd.concat([df, ego_ped_df], ignore_index=True)
+        df = df.sort_values(by=['frame', 'id']).reset_index(drop=True)
 
     ####################
     ##### plotting #####
@@ -94,7 +96,7 @@ def main(scene, args):
     if args.length is None:
         args.length = len(images_0)
     if args.visualize:
-        visualize_BEV_trajs(df, images_0, images_2, images_4, images_6, images_8,
+        visualize_BEV_trajs(df, df_ego, images_0, images_2, images_4, images_6, images_8,
                             scene, args)
 
     # save new trajectories
@@ -128,7 +130,7 @@ if __name__ == "__main__":
 
         mp.set_start_method('spawn')
         list_of_args = []
-        for scene in WITH_MOVEMENT:#WITH_MOVEMENT_ADJUSTED:#NO_MOVEMENT + WITH_MOVEMENT_ADJUSTED:
+        for scene in TRAIN + TEST:#WITH_MOVEMENT_ADJUSTED:
             list_of_args.append((scene, args))
         with mp.Pool(min(len(list_of_args), mp.cpu_count())) as p:
             p.starmap(main, list_of_args)

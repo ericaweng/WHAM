@@ -1,4 +1,5 @@
-""" option to use ground truth 2d poses instead of detection, tracking, and 2d pose estimation"""
+""" get 2d joint motion embeddings
+try 2"""
 
 import os
 import json
@@ -191,7 +192,8 @@ def run(cfg,
         else:
             slam = None
 
-        if args.use_gt_poses and video.split('/')[-1].split("_image")[0] in TRAIN:
+        scene = video.split('/')[-1].split("_image")[0]
+        if args.use_gt_poses and scene in TRAIN:
             all_poses_and_bboxes = load_bboxes_and_poses(video, length, args)
 
         bar = Bar('Preprocess: 2D detection and SLAM', fill='#', max=length)
@@ -206,7 +208,6 @@ def run(cfg,
                 # if no pose exists for a gt box, detect it.
 
                 # video_length, num_objects, {pose: (17, 3), box: (4,)}
-                bboxes_to_est_pose = []
                 for track_id, bbox_pose_dict in all_poses_and_bboxes[current_frame].items():
                     if 'pose' in bbox_pose_dict:
                         # load gt 2d tracks into tracking_results
@@ -216,24 +217,10 @@ def run(cfg,
                         detector.tracking_results['bbox'].append(detector.xyxy_to_cxcys(bbox_pose_dict['box']))
                         detector.tracking_results['keypoints'].append(bbox_pose_dict['pose'][None])
 
-                    else:  # no gt pose exists for this bbox. so detect it using ViTPose
-                        bboxes_to_est_pose.append({'bbox': bbox_pose_dict['box'], 'id': track_id})
-
-                if len(bboxes_to_est_pose) > 0:
-                    assert (len(bboxes_to_est_pose) + np.sum(['pose' in bbox_pose_dict for bbox_pose_dict in all_poses_and_bboxes[current_frame].values()])
-                            == len(all_poses_and_bboxes[current_frame])), \
-                        f"should have a pose for each bbox. but len(bboxes): {len(bboxes_to_est_pose)}, len(all_poses_and_bboxes[current_frame]): {len(all_poses_and_bboxes[current_frame])}"
-                    detector.pose_estimation(img, bboxes_to_est_pose)  # logging the tracking results already occurs in the function
-                    assert np.all([d.shape == detector.tracking_results['bbox'][0].shape for d in detector.tracking_results['bbox']]), \
-                        f"should have the same shape. but [d.shape for d in detector.tracking_results['bbox']]: {[d.shape for d in detector.tracking_results['bbox']]}"
-                    assert np.all([d.shape == detector.tracking_results['keypoints'][0].shape for d in detector.tracking_results['keypoints']]), \
-                        f"should have the same shape. but [d.shape for d in detector.tracking_results['keypoints']]: {[d.shape for d in detector.tracking_results['keypoints']]}"
-                else:
-                    detector.frame_id += 1
+                detector.frame_id += 1
 
             else:
                 # 2D detection and tracking from scratch w/o gt bboxes nor poses
-                # detector.track(img, fps, length)
                 detector.frame_id += 1
 
             if args.visualize:
@@ -287,20 +274,13 @@ def run(cfg,
 
             # data
             _id, x, inits, features, mask, init_root, cam_angvel, frame_id, kwargs = batch
-            import ipdb; ipdb.set_trace()
 
             # inference
             pred = network(x, inits, features, mask=mask, init_root=init_root, cam_angvel=cam_angvel, return_y_up=True,
                            **kwargs)
 
             # Store results
-            results[_id]['poses_body'] = pred['poses_body'].detach().cpu().squeeze(0).numpy()
-            results[_id]['poses_root_cam'] = pred['poses_root_cam'].detach().cpu().squeeze(0).numpy()
-            results[_id]['betas'] = pred['betas'].detach().cpu().squeeze(0).numpy()
-            results[_id]['verts_cam'] = (pred['verts_cam'] + pred['trans_cam'].unsqueeze(1)).detach().cpu().numpy()
-            results[_id]['poses_root_world'] = pred['poses_root_world'].detach().cpu().squeeze(0).numpy()
-            results[_id]['trans_world'] = pred['trans_world'].detach().cpu().squeeze(0).numpy()
-            results[_id]['frame_id'] = frame_id
+            results[_id]['embedding'] = None
 
         # save results
         joblib.dump(results, osp.join(output_pth, 'results.pth'))
@@ -372,6 +352,12 @@ if __name__ == '__main__':
                    'svl-meeting-gates-2-2019-04-08_1',  # impercitible slight rotation
                    'tressider-2019-03-16_0',
                    'tressider-2019-03-16_1', ]
+    poses_2d = np.load('../AgentFormerSDD/datasets/jrdb_adjusted/poses_2d_for_wham_pose_embedding.npz',
+                       allow_pickle=True)['data'].item()
+
+    embeddings = {}
+    for scene in poses_2d:
+        print(f"scene: {scene}")
 
     for camera_num in range(0, 9, 2):
         for scene in no_movement:#with_movement:

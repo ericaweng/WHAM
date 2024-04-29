@@ -15,12 +15,15 @@ import joblib
 from jrdb_split import TRAIN, TEST, WITH_MOVEMENT, NO_MOVEMENT, WITH_MOVEMENT_ADJUSTED
 
 
-def visualize_BEV_trajs(df, images_0, images_2, images_4, images_6, images_8,
+def visualize_BEV_trajs(df, df_ego, images_0, images_2, images_4, images_6, images_8,
                         scene, args):
     # Determine the min and max positions for scaling across all frames
     min_x, max_x = df['x'].min(), df['x'].max()
     min_y, max_y = df['y'].min(), df['y'].max()
     print("min_x: {}, max_x: {}, min_y: {}, max_y: {}".format(min_x, max_x, min_y, max_y))
+
+    min_x_ego, max_x_ego = df_ego['x'].min(), df_ego['x'].max()
+    min_y_ego, max_y_ego = df_ego['y'].min(), df_ego['y'].max()
 
     # Assign unique colors to each pedestrian ID
     unique_ids = df['id'].unique()
@@ -29,12 +32,14 @@ def visualize_BEV_trajs(df, images_0, images_2, images_4, images_6, images_8,
 
     # generate frames
     frames = []
-    items = list(enumerate(df.groupby('frame')))[:args.length:args.skip]
+    # items = list(enumerate(df.groupby('frame')))[:args.length:args.skip]
+    items = list(enumerate(zip(df.groupby('frame'), df_ego.groupby('frame'))))[::args.skip]
 
     if not os.path.exists(args.output_viz_dir):
         os.makedirs(args.output_viz_dir)
 
-    for (t, (frame, trajectories)) in tqdm(items[::-1], total=len(images_0) // args.skip):
+    for (t, ((frame, trajectories), (frame_ego, trajectories_ego))) in tqdm(items[::-1], total=len(images_0) // args.skip):
+        # for (t, (frame, trajectories)) in tqdm(items[::-1], total=len(images_0) // args.skip):
         fig, ((ax1, ax, ax_im), (ax_im0, ax_im1, ax_im2)) = plt.subplots(2, 3, figsize=(20, 10))
 
         # plot camera ego image((image, image2, image4, image6, image8),
@@ -82,17 +87,17 @@ def visualize_BEV_trajs(df, images_0, images_2, images_4, images_6, images_8,
                         color='black')
 
         # egomotion
-        # ax1.set_xlim(min_x_ego, max_x_ego)
-        # ax1.set_ylim(min_y_ego, max_y_ego)
-        # ax1.set_aspect('equal')
-        # ax.set_title(f"scene: {scene}, frame: {frame}")
-        # # other static_peds_this_frame
-        # for _, row in trajectories_ego.iterrows():
-        #     ax1.scatter(row['x'], row['y'], s=10, color=color_dict[row['id']])
-        # # ego-agent
-        # ax1.add_artist(plt.Circle((0,0), radius=0.5, color='red', fill=True))
-        # # ego rotation
-        # ax1.add_artist(plt.Arrow(0,0, 10, 0, width=1, color='red'))
+        ax1.set_xlim(min_x_ego, max_x_ego)
+        ax1.set_ylim(min_y_ego, max_y_ego)
+        ax1.set_aspect('equal')
+        ax.set_title(f"scene: {scene}, frame: {frame}")
+        # other static_peds_this_frame
+        for _, row in trajectories_ego.iterrows():
+            ax1.scatter(row['x'], row['y'], s=10, color=color_dict[row['id']])
+        # ego-agent
+        ax1.add_artist(plt.Circle((0,0), radius=0.5, color='red', fill=True))
+        # ego rotation
+        ax1.add_artist(plt.Arrow(0,0, 10, 0, width=1, color='red'))
 
         # save fig
         plt.tight_layout()

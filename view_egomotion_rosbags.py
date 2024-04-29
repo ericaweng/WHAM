@@ -18,6 +18,8 @@ class EgomotionEstimatorWithOrientation:
         self.scene = bag_file.split('/')[-1].split('.')[0]
         self.bag = rosbag.Bag(bag_file)
         self.states = []
+        self.accelerations = []
+        self.velocities = [[0, 0, 0]]
         self.times = []
         self.gps_times = []
 
@@ -29,12 +31,12 @@ class EgomotionEstimatorWithOrientation:
                                                             'segway/feedback/wheel_odometry',
                                                             'segway/feedback/gps/fix_2d']):
             if topic == 'segway/feedback/ext_imu':
-                # self.times.append(t.to_sec())
-                # self.process_imu_data(msg)
+                self.times.append(t.to_sec())
+                self.process_imu_data(msg)
                 imu_datas +=1
             elif topic == 'segway/feedback/wheel_odometry':
-                self.times.append(t.to_sec())
-                self.process_odom_data(msg)
+                # self.times.append(t.to_sec())
+                # self.process_odom_data(msg)
                 odom_datas += 1
             elif topic == 'segway/feedback/gps/fix_2d':
                 # self.times.append(t.to_sec())
@@ -48,15 +50,22 @@ class EgomotionEstimatorWithOrientation:
 
     def process_imu_data(self, imu_data):
         # Extract the yaw (rotation) from the IMU quaternion
-        x = imu_data.orientation.x
-        y = imu_data.orientation.y
-        z = imu_data.orientation.z
+        x = imu_data.linear_acceleration.x
+        y = imu_data.linear_acceleration.y
+        z = imu_data.linear_acceleration.z
         orientation_q = Quaternion(imu_data.orientation.w, imu_data.orientation.x, imu_data.orientation.y, imu_data.orientation.z)
         euler = orientation_q.yaw_pitch_roll
         yaw = euler[0]
         print(f"IMU position + orientation: ({x}, {y}, {z}, {orientation_q})")
 
         # Update the filter with the new orientation
+        if len(self.states) == 0:
+            self.states.append([0, 0, 0])
+            self.times.append(self.times[-1])
+        # self.accelerations.append([x, y, z])
+        # self.velocities.append([self.velocities[-1][0] + x, self.velocities[-1][1] + y, self.velocities[-1][2] + z])
+        # self.states.append([self.states[-1][0] + self.velocities[-1][0], self.states[-1][1] + self.velocities[-1][1], yaw])
+
         self.states.append([x, y, yaw])
 
     def process_odom_data(self, odom_data):
@@ -121,18 +130,19 @@ def main(scene, args):
     plt.savefig(f'{viz_save_dir}/{estimator.scene}.png')
 
     # save to npy
-    egomotion_savedir = args.egomotion_savedir
-    if not os.path.exists(egomotion_savedir):
-        os.makedirs(egomotion_savedir)
+    if args.egomotion_savedir is not None:
+        egomotion_savedir = args.egomotion_savedir
+        if not os.path.exists(egomotion_savedir):
+            os.makedirs(egomotion_savedir)
 
-    estimator.states = np.array(estimator.states).squeeze()
-    np.save(f'{egomotion_savedir}/{estimator.scene}.npy', sampled_states)
+        estimator.states = np.array(estimator.states).squeeze()
+        np.save(f'{egomotion_savedir}/{estimator.scene}.npy', sampled_states)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--egomotion_savedir', '-es', type=str, default=f"'jrdb/rosbag_egomotion_odom'")
-    parser.add_argument('--viz_save_dir', '-vs', type=str, default=f'../viz/rosbag_odom')
+    parser.add_argument('--egomotion_savedir', '-es', type=str, default=f"'jrdb/rosbag_egomotion_imu_fixed'")
+    parser.add_argument('--viz_save_dir', '-vs', type=str, default=f'../viz/rosbag_imu_fixed')
     args = parser.parse_args()
 
     for scene in WITH_MOVEMENT:
